@@ -8,6 +8,7 @@ bool usb_is_configured(void);
 void usb_send(end_point *ep, uint8_t *buf, uint8_t len);
 uint8_t usb_get(end_point *ep, uint8_t *buf, uint8_t max_len);
 void usb_send_ack(void);
+void usb_send_config_num(void);
 
 void usb_setup_handler(void);
 void usb_buff_status_handler(void);
@@ -24,5 +25,10 @@ device_descriptor usb_make_dev_desc();
 interface_descriptor usb_make_int_desc();
 endpoint_descriptor usb_make_end_desc(uint8_t ep_num, bool in);
 configuration_descriptor usb_make_conf_desc(uint8_t ep_count, uint8_t int_count);
+
+void ep0_in_func(void);
+void ep0_out_func(void);
+void ep1_out_func(void);
+void ep2_in_func(void);
 
 #endif

@@ -126,7 +126,7 @@ void usb_send_ack(void) {
     usb_send(&ep0_in, NULL, 0);
 }
 
-void usb_send_config(void) {
+void usb_send_config_num(void) {
     uint8_t config_num = 1;
     usb_send(&ep0_in, &config_num, 1);
 }
@@ -154,7 +154,7 @@ void usb_setup_handler(void) {
                 break;
             }
         } else if (packet->bRequest == REQUEST_GET_CONFIGURATION) {
-            usb_send_config();
+            usb_send_config_num();
         } 
     } else if (packet->bmRequestType == USB_DIR_OUT) {
         switch (packet->bRequest) {
@@ -180,25 +180,22 @@ void usb_buff_status_handler(void) {
     uint32_t unhandled = usb_hw->buf_status;
     if (unhandled & USB_BUFF_STATUS_EP0_IN_BITS) {
         usb_hw_clear->buf_status = USB_BUFF_STATUS_EP0_IN_BITS;
-        if (change_address) {
-            // if address change was requested we change it here
-            usb_hw->dev_addr_ctrl = device_address;
-            change_address = false;
-        } else {
-            usb_get(&ep0_out, NULL, 0);
-        }
+        ep0_in_func();
         ep0_in.available = 1;
     }
     if (unhandled & USB_BUFF_STATUS_EP0_OUT_BITS) {
         usb_hw_clear->buf_status = USB_BUFF_STATUS_EP0_OUT_BITS;
+        ep0_out_func();
         ep0_out.available = 1;
     }
     if (unhandled & USB_BUFF_STATUS_EP1_OUT_BITS) {
         usb_hw_clear->buf_status = USB_BUFF_STATUS_EP1_OUT_BITS;
+        ep1_out_func();
         ep1_out.available = 1;
     }
     if (unhandled & USB_BUFF_STATUS_EP2_IN_BITS) {
         usb_hw_clear->buf_status = USB_BUFF_STATUS_EP2_IN_BITS;
+        ep2_in_func();
         ep2_in.available = 1;
     }
     if (usb_hw->buf_status != 0) assert(0 && "unhandled end point");
@@ -348,5 +345,24 @@ void usb_set_ep(end_point *ep) {
 } 
 
 // endpoint functions
+void ep0_in_func(void) {
+    if (change_address) {
+        // if address change was requested we change it here
+        usb_hw->dev_addr_ctrl = device_address;
+        change_address = false;
+    } else {
+        usb_get(&ep0_out, NULL, 0);
+    }
+}
 
+void ep0_out_func(void) {
+}
+
+void ep1_out_func(void) {
+
+}
+
+void ep2_in_func(void) {
+
+}
 
