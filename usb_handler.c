@@ -20,6 +20,7 @@
 static end_point ep0_in = {
     .number = 0,
     .pid = 1,
+    .available = true,
     .buffer = &usb_dpram->ep0_buf_a[0], // buffer is fixed for ep0
     .ep_ctrl = NULL, // no ep control for ep0
     .buf_ctrl = &usb_dpram->ep_buf_ctrl[0].in
@@ -27,6 +28,7 @@ static end_point ep0_in = {
 static end_point ep0_out = {
     .number = 0,
     .pid = 1,
+    .available = true,
     .buffer = &usb_dpram->ep0_buf_a[0],
     .ep_ctrl = NULL,
     .buf_ctrl = &usb_dpram->ep_buf_ctrl[0].out
@@ -35,6 +37,7 @@ static end_point ep0_out = {
 static end_point ep1_out = {
     .number = 1,
     .pid = 0,
+    .available = true,
     .buffer = usb_dpram->epx_data, // start of shared buffer
     .ep_ctrl = &usb_dpram->ep_ctrl[0].out,
     .buf_ctrl = &usb_dpram->ep_buf_ctrl[1].out
@@ -68,7 +71,7 @@ void usb_init() {
     // zero out the usb buffer
     memset(usb_dpram, 0, sizeof(*usb_dpram));
     // muxing the controller to the integrated usb port
-    usb_hw->muxing = USB_USB_MUXING_TO_PHY_BITS;
+    usb_hw->muxing = USB_USB_MUXING_TO_PHY_BITS | USB_USB_MUXING_SOFTCON_BITS;
     // forcing vbus detection so the device thinks its plugged in
     usb_hw->pwr = USB_USB_PWR_VBUS_DETECT_BITS | USB_USB_PWR_VBUS_DETECT_OVERRIDE_EN_BITS;
     // enables the controller, leaves bit 1 to 0 for device mode
@@ -108,8 +111,6 @@ void usb_send(end_point *ep, uint8_t *buf, uint8_t len) {
 
 uint8_t usb_get(end_point *ep, uint8_t *buf, uint8_t max_len) {
     if (max_len > 64) assert(0 && "len has to be less than or equal 64");
-    // wait till the ep buffer is in our control (buf_ctrl bit 10 is zero)
-    while (~(*ep->buf_ctrl) & USB_BUF_CTRL_AVAIL) tight_loop_contents();
     // get the length of the transfer
     uint16_t len = *ep->buf_ctrl & USB_BUF_CTRL_LEN_MASK;
     // copy data from dpram to buffer
@@ -154,6 +155,7 @@ void usb_setup_handler(void) {
             usb_set_address(packet);
             break;
         case REQUEST_SET_CONFIGURATION:
+        printf("set conf\n");
             // only one configuration so just acknowledge
             usb_send_ack();
             configured = true;
@@ -173,6 +175,8 @@ void usb_buff_status_handler(void) {
             // if address change was requested we change it here
             usb_hw->dev_addr_ctrl = device_address;
             change_address = false;
+        } else {
+            usb_get(&ep0_out, NULL, 0);
         }
         ep0_in.available = 1;
     }
@@ -234,7 +238,7 @@ void usb_set_address(volatile usb_setup_packet *packet) {
 void usb_send_dev_desc(volatile usb_setup_packet *packet) {
     printf("send dev\n");
     device_descriptor desc = usb_make_dev_desc();
-    usb_send(&ep0_in, (uint8_t *)&desc, sizeof(desc));
+    usb_send(&ep0_in, (uint8_t *)&desc, MIN(packet->wLength, sizeof(desc)));
 }
 
 // TODO FIX THIS SHIT
@@ -257,7 +261,7 @@ void usb_send_conf_desc(volatile usb_setup_packet *packet) {
         index += sizeof(end_desc2);
     }
 
-    usb_send(&ep0_in, tmp_buf, index);
+    usb_send(&ep0_in, tmp_buf, MIN(packet->wLength, index));
 }
 
 device_descriptor usb_make_dev_desc() {
@@ -269,8 +273,8 @@ device_descriptor usb_make_dev_desc() {
     desc.bDeviceSubClass = 0; // no subclass
     desc.bDeviceProtocol = 0; // no protocol
     desc.bMaxPacketSize = 64; // pico sdk says this is the maximum / this is max for bulk and control
-    desc.idVendor = 0x0; // vendor id
-    desc.idProduct = 0x1; // product id
+    desc.idVendor = RONALDS_VENDOR_ID; // vendor id
+    desc.idProduct = RONALDS_PRODUCT_ID; // product id
     desc.bcdDevice = 0; // no release number
     desc.iManufacturer = 0; // no strings
     desc.iProduct = 0; // no strings
