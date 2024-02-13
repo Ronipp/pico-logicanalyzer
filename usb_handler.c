@@ -126,6 +126,11 @@ void usb_send_ack(void) {
     usb_send(&ep0_in, NULL, 0);
 }
 
+void usb_send_config(void) {
+    uint8_t config_num = 1;
+    usb_send(&ep0_in, &config_num, 1);
+}
+
 // called when setup request irq is raised
 void usb_setup_handler(void) {
     // the setup packet received
@@ -148,6 +153,8 @@ void usb_setup_handler(void) {
                 assert(0 && "unhandled get_descriptor event");
                 break;
             }
+        } else if (packet->bRequest == REQUEST_GET_CONFIGURATION) {
+            usb_send_config();
         } 
     } else if (packet->bmRequestType == USB_DIR_OUT) {
         switch (packet->bRequest) {
@@ -163,6 +170,8 @@ void usb_setup_handler(void) {
         default:
             break;
         }
+    } else {
+        assert(0 && "some other request");
     }
 }
 
@@ -227,9 +236,9 @@ void usb_reset_bus(void) {
 
 // this is called during enumeration
 void usb_set_address(volatile usb_setup_packet *packet) {
-    printf("set addr\n");
     // new device address given during enumeration
     device_address = (packet->wValue & 0xff);
+    printf("set addr: %d\n", device_address);
     // address needs to be changed after acknowledging 
     change_address = true;
     usb_send_ack();

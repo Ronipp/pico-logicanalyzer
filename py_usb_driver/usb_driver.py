@@ -1,19 +1,25 @@
 
 import usb.core
 import usb.util
-import libusb
+import usb.backend.libusb1
+import libusb_package
+import os
+os.environ['PYUSB_DEBUG'] = 'debug'
 
+str = libusb_package.find_library("lib")
+be = usb.backend.libusb1.get_backend(find_library=lambda x: str)
 # find our device
-dev = usb.core.find(idVendor=0x0069, idProduct=0x0042)
-print(dev)
+dev = usb.core.find(idVendor=0x69, idProduct=0x42, backend=be)
 # was it found?
 if dev is None:
     raise ValueError('Device not found')
 
+
+dev.set_configuration()
 # get an endpoint instance
 cfg = dev.get_active_configuration()
-intf = cfg[(0, 0)]
 print(cfg)
+intf = cfg[(0, 0)]
 
 outep = usb.util.find_descriptor(
     intf,
