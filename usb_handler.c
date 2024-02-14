@@ -14,6 +14,10 @@
 #define EP_COUNT 2
 #define INTERFACE_COUNT 1
 
+#define MANUFACTURER_STRING_INDEX 1
+#define PRODUCT_STRING_INDEX 2
+#define WINDOWS_STRING_DESCRIPTOR_INDEX 0xee
+
 #define usb_hw_clear ((usb_hw_t *)hw_clear_alias_untyped(usb_hw))
 
 // global endpoints
@@ -131,10 +135,18 @@ void usb_send_config_num(void) {
     usb_send(&ep0_in, &config_num, 1);
 }
 
+void usb_send_status(void) {
+    printf("send status\n");
+    uint16_t status = DEVICE_STATUS;
+    usb_send(&ep0_in, (uint8_t *)&status, 2);
+}
+
 // called when setup request irq is raised
 void usb_setup_handler(void) {
     // the setup packet received
     volatile usb_setup_packet *packet = (volatile usb_setup_packet *) &usb_dpram->setup_packet;
+    printf("reqtype: 0x%02x, breq: 0x%02x\n", packet->bmRequestType, packet->bRequest);
+    printf("wval: 0x%04x, windx: 0x%04x, wlen: 0x%04x\n",packet->wValue, packet->wIndex, packet->wLength);
     // pid has to be 1 for sending descriptors
     ep0_in.pid = 1;
     // only handling standard requests
@@ -149,12 +161,19 @@ void usb_setup_handler(void) {
             case CONFIGURATION_DESCRIPTOR_TYPE:
                 usb_send_conf_desc(packet);
                 break;
+            case STRING_DESCRIPTOR_TYPE:
+                usb_send_string_desc(packet);
+                break;
             default:
                 assert(0 && "unhandled get_descriptor event");
                 break;
             }
         } else if (packet->bRequest == REQUEST_GET_CONFIGURATION) {
             usb_send_config_num();
+        } else if (packet->bRequest == REQUEST_GET_STATUS) {
+            usb_send_status();
+        } else {
+            assert(0 && "some other in request");
         } 
     } else if (packet->bmRequestType == USB_DIR_OUT) {
         switch (packet->bRequest) {
@@ -168,6 +187,7 @@ void usb_setup_handler(void) {
             configured = true;
             break;
         default:
+            assert(0 && "some other out request");
             break;
         }
     } else {
@@ -241,6 +261,52 @@ void usb_set_address(volatile usb_setup_packet *packet) {
     usb_send_ack();
 }
 
+void usb_send_string_desc(volatile usb_setup_packet *packet) {
+    printf("send string\n");
+    uint8_t index = packet->wValue & 0xff;
+    if (index == 0) {
+        language_descriptor desc = {
+            .bLength = sizeof(language_descriptor),
+            .bDescriptorType = STRING_DESCRIPTOR_TYPE,
+            .wLANGID0 = LANG_US
+        };
+        usb_send(&ep0_in, (uint8_t *)&desc, sizeof(language_descriptor));
+    } else if (index == MANUFACTURER_STRING_INDEX) {
+        const char *string = "Ronald";
+        uint8_t buflen = ((2 * strlen(string)) + sizeof(string_descriptor_head));
+        string_descriptor_head head = {
+            .bLength = buflen,
+            .bDescriptorType = STRING_DESCRIPTOR_TYPE
+        };
+        uint8_t buf[64];
+        memcpy((void *)buf, (void *)&head, sizeof(head));
+        for (int i=0; i<strlen(string); i++) {
+            buf[sizeof(head) + (2*i)] = string[i];
+            buf[sizeof(head) + (2*i) + 1] = 0;
+        }
+        usb_send(&ep0_in, buf, buflen);
+    } else if (index == PRODUCT_STRING_INDEX) {
+        const char *string = "Logic";
+        uint8_t buflen = ((2 * strlen(string)) + sizeof(string_descriptor_head));
+        string_descriptor_head head = {
+            .bLength = buflen,
+            .bDescriptorType = STRING_DESCRIPTOR_TYPE
+        };
+        uint8_t buf[64];
+        memcpy((void *)buf, (void *)&head, sizeof(head));
+        for (int i=0; i<strlen(string); i++) {
+            buf[sizeof(head) + (2*i)] = string[i];
+            buf[sizeof(head) + (2*i) + 1] = 0;
+        }
+        usb_send(&ep0_in, buf, buflen);
+    } else if (index == WINDOWS_STRING_DESCRIPTOR_INDEX) {
+        // TODO MAKE MS OS STR DESC
+    } else {
+        printf("%d : %d\n", packet->wValue, packet->wIndex);
+        assert(0 && "some other index");
+    }
+}
+
 void usb_send_dev_desc(volatile usb_setup_packet *packet) {
     printf("send dev\n");
     device_descriptor desc = usb_make_dev_desc();
@@ -282,8 +348,8 @@ device_descriptor usb_make_dev_desc() {
     desc.idVendor = RONALDS_VENDOR_ID; // vendor id
     desc.idProduct = RONALDS_PRODUCT_ID; // product id
     desc.bcdDevice = 0; // no release number
-    desc.iManufacturer = 0; // no strings
-    desc.iProduct = 0; // no strings
+    desc.iManufacturer = MANUFACTURER_STRING_INDEX; // index of string
+    desc.iProduct = PRODUCT_STRING_INDEX; // index of string
     desc.iSerialNumber = 0; // no strings
     desc.bNumConfigurations = 1; // one configuration
 

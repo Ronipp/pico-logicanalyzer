@@ -5,18 +5,20 @@
 
 #define DEVICE_DESCRIPTOR_TYPE 0x01
 #define CONFIGURATION_DESCRIPTOR_TYPE 0x02
+#define STRING_DESCRIPTOR_TYPE 0x3
 #define INTERFACE_DESCRIPTOR_TYPE 0x04
 #define ENDPOINT_DESCRIPTOR_TYPE 0x05
 
 #define BULK_TRANSFER_TYPE 0x2
 #define CONTROL_TRANSFER_TYPE 0x0
+#define DEVICE_STATUS 0x1
 
 #define USB_DIR_IN 0x80
 #define USB_DIR_OUT 0x0
 
 #define MAX_PACKET_SIZE 64
 
-#define USB_SPECIFICATION_NUMBER 0x0110
+#define USB_SPECIFICATION_NUMBER 0x0200
 #define VENDOR_SPECIFIC 0xff
 #define CONFIG_ATTRIBUTES 0xc0
 #define MAXPOWER_100MA 0x32
@@ -30,8 +32,10 @@
 #define REQUEST_GET_CONFIGURATION 0x08
 #define REQUEST_SET_CONFIGURATION 0x09
 
-#define RONALDS_VENDOR_ID 0x69
-#define RONALDS_PRODUCT_ID 0x42
+#define RONALDS_VENDOR_ID 0x69 + 2
+#define RONALDS_PRODUCT_ID 0x42 + 2
+
+#define LANG_US 0x0409
 
 // https://www.beyondlogic.org/usbnutshell/usb5.shtml
 
@@ -159,6 +163,29 @@ D4..0 Recipient
 3 = Other
 4..31 = Reserved
 */
+
+typedef struct {
+    uint8_t bLength;
+    uint8_t bDescriptorType; // 0x3
+    uint16_t wLANGID0;
+} __packed language_descriptor;
+
+typedef struct {
+    uint8_t bLength;
+    uint8_t bDescriptorType;
+} __packed string_descriptor_head;
+
+
+/*
+MS DESCRIPTORS
+*/
+typedef struct {
+    uint8_t bLength; // should be 0x12
+    uint8_t bDescriptorType; // string 0x3
+    uint8_t qwSignature[14]; // buffer for the magic string MSFT100
+    uint8_t bMS_VendorCode; // vendor code used to get next descriptors
+    uint8_t bPad; // padding should be 0
+} __packed ms_os_string_descriptor;
 
 /*
 endpoint struct
