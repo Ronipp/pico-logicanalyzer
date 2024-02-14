@@ -6,6 +6,7 @@ project(logicanalyzer VERSION 0.1.0 LANGUAGES C CXX ASM)
 
 pico_sdk_init()
 
+
 add_executable(${PROJECT_NAME} usbtest.c)
 # add_executable(${PROJECT_NAME} main.c)
 add_library(pinpoller pinpoller.c)
