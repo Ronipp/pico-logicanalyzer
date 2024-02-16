@@ -3,6 +3,8 @@
 
 #include "usb_descriptors.h"
 
+typedef void (*ep_func_ptr)(uint8_t *buffer, uint8_t len);
+
 void usb_init();
 bool usb_is_configured(void);
 void usb_send(end_point *ep, uint8_t *buf, uint8_t len);
@@ -38,5 +40,8 @@ void ep0_in_func(void);
 void ep0_out_func(void);
 void ep1_out_func(void);
 void ep2_in_func(void);
+
+void usb_register_ep1_out_func(ep_func_ptr function);
+void usb_register_ep2_in_func(ep_func_ptr function);
 
 #endif

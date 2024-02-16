@@ -218,22 +218,18 @@ void usb_buff_status_handler(void) {
     if (unhandled & USB_BUFF_STATUS_EP0_IN_BITS) {
         usb_hw_clear->buf_status = USB_BUFF_STATUS_EP0_IN_BITS;
         ep0_in_func();
-        ep0_in.available = 1;
     }
     if (unhandled & USB_BUFF_STATUS_EP0_OUT_BITS) {
         usb_hw_clear->buf_status = USB_BUFF_STATUS_EP0_OUT_BITS;
         ep0_out_func();
-        ep0_out.available = 1;
     }
     if (unhandled & USB_BUFF_STATUS_EP1_OUT_BITS) {
         usb_hw_clear->buf_status = USB_BUFF_STATUS_EP1_OUT_BITS;
         ep1_out_func();
-        ep1_out.available = 1;
     }
     if (unhandled & USB_BUFF_STATUS_EP2_IN_BITS) {
         usb_hw_clear->buf_status = USB_BUFF_STATUS_EP2_IN_BITS;
         ep2_in_func();
-        ep2_in.available = 1;
     }
     if (usb_hw->buf_status != 0) assert(0 && "unhandled end point");
 }
@@ -488,11 +484,24 @@ void ep0_in_func(void) {
     }
 }
 
-void ep0_out_func(void) {
+void ep0_out_func(void) {}
+
+static ep_func_ptr user_ep1_func = NULL;
+static ep_func_ptr user_ep2_func = NULL;
+
+void usb_register_ep1_out_func(ep_func_ptr function) {
+    user_ep1_func = function;
+}
+
+void usb_register_ep2_in_func(ep_func_ptr function) {
+    user_ep2_func = function;
 }
 
 void ep1_out_func(void) {
-
+    if (user_ep1_func == NULL) return;
+    uint8_t buf[64];
+    uint8_t len = usb_get(&ep1_out, buf, 64);
+    user_ep1_func(buf, len);
 }
 
 void ep2_in_func(void) {
