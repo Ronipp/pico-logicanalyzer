@@ -8,6 +8,7 @@
 #define STRING_DESCRIPTOR_TYPE 0x3
 #define INTERFACE_DESCRIPTOR_TYPE 0x04
 #define ENDPOINT_DESCRIPTOR_TYPE 0x05
+#define QUALIFIER_DESCRIPTOR_TYPE 0x06
 
 #define BULK_TRANSFER_TYPE 0x2
 #define CONTROL_TRANSFER_TYPE 0x0
@@ -15,6 +16,8 @@
 
 #define USB_DIR_IN 0x80
 #define USB_DIR_OUT 0x0
+#define MS_REQUEST_TYPE 0xc0
+#define MS_EXT_PROP_REQUEST 0xc1
 
 #define MAX_PACKET_SIZE 64
 
@@ -32,10 +35,12 @@
 #define REQUEST_GET_CONFIGURATION 0x08
 #define REQUEST_SET_CONFIGURATION 0x09
 
-#define RONALDS_VENDOR_ID 0x69 + 2
-#define RONALDS_PRODUCT_ID 0x42 + 2
+#define RONALDS_VENDOR_ID 0x69
+#define RONALDS_PRODUCT_ID 0x42
 
 #define LANG_US 0x0409
+
+#define MS_OS_INDEX 0x0004 // from documentation
 
 // https://www.beyondlogic.org/usbnutshell/usb5.shtml
 
@@ -186,6 +191,26 @@ typedef struct {
     uint8_t bMS_VendorCode; // vendor code used to get next descriptors
     uint8_t bPad; // padding should be 0
 } __packed ms_os_string_descriptor;
+
+typedef struct {
+    uint32_t dwLength; // size
+    uint16_t bcdVersion; // descriptors version
+    uint16_t wIndex; // set to 0x04
+    uint8_t bCount; // number of properties should set to 1
+    uint8_t reserved[7]; // 7 bytes of reserved should set to 0
+    uint8_t bFirstInterfaceNumber; // first interface should be 0
+    uint8_t reserve; // one byte of reserved
+    uint8_t compatibleID[8]; // compatible id string should be "WINUSB00"
+    uint8_t subCompatibleID[8]; // shoud be set to all zeros
+    uint8_t reserv[6]; // a lot of reserved
+} __packed winsub_descriptor;
+
+typedef struct {
+    uint32_t dwLength;
+    uint16_t bcdVersion; // descriptor version
+    uint16_t wIndex; // should be 0x5?
+    uint16_t wCount; // should be 0?
+} __packed ms_extended_properties_descriptor;
 
 /*
 endpoint struct

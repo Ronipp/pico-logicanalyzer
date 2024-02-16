@@ -18,6 +18,9 @@
 #define PRODUCT_STRING_INDEX 2
 #define WINDOWS_STRING_DESCRIPTOR_INDEX 0xee
 
+#define MS_OS_VENDOR_ID 0x42
+#define MS_BCD_VER 0x0100
+
 #define usb_hw_clear ((usb_hw_t *)hw_clear_alias_untyped(usb_hw))
 
 // global endpoints
@@ -130,6 +133,11 @@ void usb_send_ack(void) {
     usb_send(&ep0_in, NULL, 0);
 }
 
+void usb_send_stall(void) {
+    usb_hw->ep_stall_arm = 0x1;
+    *ep0_in.buf_ctrl |= USB_BUF_CTRL_STALL;
+}
+
 void usb_send_config_num(void) {
     uint8_t config_num = 1;
     usb_send(&ep0_in, &config_num, 1);
@@ -164,6 +172,10 @@ void usb_setup_handler(void) {
             case STRING_DESCRIPTOR_TYPE:
                 usb_send_string_desc(packet);
                 break;
+            case QUALIFIER_DESCRIPTOR_TYPE:
+                // no high speed unfortunately
+                usb_send_stall();
+                break;
             default:
                 assert(0 && "unhandled get_descriptor event");
                 break;
@@ -190,6 +202,11 @@ void usb_setup_handler(void) {
             assert(0 && "some other out request");
             break;
         }
+    } else if (packet->bmRequestType == MS_REQUEST_TYPE) {
+        assert(packet->bRequest == MS_OS_VENDOR_ID);
+        usb_send_winusb_desc(packet);
+    } else if (packet->bmRequestType == MS_EXT_PROP_REQUEST) {
+        usb_send_ms_props_desc(packet);
     } else {
         assert(0 && "some other request");
     }
@@ -270,7 +287,7 @@ void usb_send_string_desc(volatile usb_setup_packet *packet) {
             .bDescriptorType = STRING_DESCRIPTOR_TYPE,
             .wLANGID0 = LANG_US
         };
-        usb_send(&ep0_in, (uint8_t *)&desc, sizeof(language_descriptor));
+        usb_send(&ep0_in, (uint8_t *)&desc, MIN(sizeof(language_descriptor), packet->wLength));
     } else if (index == MANUFACTURER_STRING_INDEX) {
         const char *string = "Ronald";
         uint8_t buflen = ((2 * strlen(string)) + sizeof(string_descriptor_head));
@@ -280,11 +297,8 @@ void usb_send_string_desc(volatile usb_setup_packet *packet) {
         };
         uint8_t buf[64];
         memcpy((void *)buf, (void *)&head, sizeof(head));
-        for (int i=0; i<strlen(string); i++) {
-            buf[sizeof(head) + (2*i)] = string[i];
-            buf[sizeof(head) + (2*i) + 1] = 0;
-        }
-        usb_send(&ep0_in, buf, buflen);
+        usb_make_str_to_unicode(string, buf + sizeof(head), 64 - sizeof(head));
+        usb_send(&ep0_in, buf, MIN(buflen, packet->wLength));
     } else if (index == PRODUCT_STRING_INDEX) {
         const char *string = "Logic";
         uint8_t buflen = ((2 * strlen(string)) + sizeof(string_descriptor_head));
@@ -294,17 +308,46 @@ void usb_send_string_desc(volatile usb_setup_packet *packet) {
         };
         uint8_t buf[64];
         memcpy((void *)buf, (void *)&head, sizeof(head));
-        for (int i=0; i<strlen(string); i++) {
-            buf[sizeof(head) + (2*i)] = string[i];
-            buf[sizeof(head) + (2*i) + 1] = 0;
-        }
-        usb_send(&ep0_in, buf, buflen);
+        usb_make_str_to_unicode(string, buf + sizeof(head), 64 - sizeof(head));
+        usb_send(&ep0_in, buf, MIN(buflen, packet->wLength));
     } else if (index == WINDOWS_STRING_DESCRIPTOR_INDEX) {
-        // TODO MAKE MS OS STR DESC
+        ms_os_string_descriptor desc = usb_make_ms_os_str_desc();
+        usb_send(&ep0_in, (uint8_t *)&desc, MIN(sizeof(desc), packet->wLength));
     } else {
         printf("%d : %d\n", packet->wValue, packet->wIndex);
         assert(0 && "some other index");
     }
+}
+
+void usb_make_str_to_unicode(const char *str, uint8_t *dst, uint8_t len) {
+    if (len < (2*strlen(str))) assert(0 && "destination buffer too short");
+    for (int i=0; i<strlen(str); i++) {
+        dst[(2*i)] = str[i];
+        dst[(2*i) + 1] = 0;
+    }
+}
+
+ms_os_string_descriptor usb_make_ms_os_str_desc(void) {
+    ms_os_string_descriptor desc;
+    desc.bLength = sizeof(ms_os_string_descriptor);
+    desc.bDescriptorType = STRING_DESCRIPTOR_TYPE;
+    const char *str = "MSFT100";
+    usb_make_str_to_unicode(str, desc.qwSignature, 14);
+    desc.bMS_VendorCode = MS_OS_VENDOR_ID;
+    desc.bPad = 0;
+    return desc;
+}
+
+void usb_send_winusb_desc(volatile usb_setup_packet *packet) {
+    printf("send winusb\n");
+    winsub_descriptor desc = usb_make_winusb_desc();
+    usb_send(&ep0_in, (uint8_t *)&desc, MIN(sizeof(desc), packet->wLength));
+}
+
+void usb_send_ms_props_desc(volatile usb_setup_packet *packet) {
+    printf("send ms props\n");
+    ms_extended_properties_descriptor desc = usb_make_ms_props_desc();
+    usb_send(&ep0_in, (uint8_t *)&desc, MIN(sizeof(desc), packet->wLength));
 }
 
 void usb_send_dev_desc(volatile usb_setup_packet *packet) {
@@ -313,7 +356,6 @@ void usb_send_dev_desc(volatile usb_setup_packet *packet) {
     usb_send(&ep0_in, (uint8_t *)&desc, MIN(packet->wLength, sizeof(desc)));
 }
 
-// TODO FIX THIS SHIT
 void usb_send_conf_desc(volatile usb_setup_packet *packet) {
     printf("send conf\n");
     configuration_descriptor desc = usb_make_conf_desc(EP_COUNT, INTERFACE_COUNT);
@@ -340,8 +382,8 @@ device_descriptor usb_make_dev_desc() {
     device_descriptor desc;
     desc.bLength = sizeof(device_descriptor); // size of this descriptor
     desc.bDescriptorType = DEVICE_DESCRIPTOR_TYPE; // type device descriptor
-    desc.bcdUSB = USB_SPECIFICATION_NUMBER; // usb 1.1
-    desc.bDeviceClass = VENDOR_SPECIFIC; // 0xff vendor specific class
+    desc.bcdUSB = USB_SPECIFICATION_NUMBER; // usb 2
+    desc.bDeviceClass = 0; // specified in interface descriptor
     desc.bDeviceSubClass = 0; // no subclass
     desc.bDeviceProtocol = 0; // no protocol
     desc.bMaxPacketSize = 64; // pico sdk says this is the maximum / this is max for bulk and control
@@ -360,8 +402,8 @@ interface_descriptor usb_make_int_desc() {
     interface_descriptor desc;
     desc.bLength = sizeof(interface_descriptor); // length
     desc.bDescriptorType = INTERFACE_DESCRIPTOR_TYPE; // type
-    desc.bInterfaceNumber = 1; // first and probably only one
-    desc.bAlternateSetting = 1; // this is the alternate
+    desc.bInterfaceNumber = 0; // first and probably only one
+    desc.bAlternateSetting = 0; // this is the alternate
     desc.bNumEndpoints = 2; // two endpoints one for receiving and one for transmitting
     desc.bInterfaceClass = VENDOR_SPECIFIC; // vendor specific
     desc.bInterfaceSubClass = 0; // no subclass
@@ -399,6 +441,31 @@ configuration_descriptor usb_make_conf_desc(uint8_t ep_count, uint8_t int_count)
     desc.bMaxPower = MAXPOWER_100MA; // 100 mA
 
     return desc;
+}
+
+winsub_descriptor usb_make_winusb_desc(void) {
+    winsub_descriptor desc = {
+        .dwLength = sizeof(winsub_descriptor),
+        .bcdVersion = MS_BCD_VER, // version one
+        .wIndex = MS_OS_INDEX, // from documentation
+        .bCount = 0x1, // one thing
+        .reserved = {0},
+        .bFirstInterfaceNumber = 0,
+        .reserve = 0x01, // from documentation
+        .compatibleID = {'W', 'I', 'N', 'U', 'S', 'B', 0, 0},
+        .subCompatibleID = {0},
+        .reserv = {0}
+    };
+    return desc;
+}
+
+ms_extended_properties_descriptor usb_make_ms_props_desc(void) {
+    ms_extended_properties_descriptor desc = {
+        .dwLength = sizeof(ms_extended_properties_descriptor),
+        .bcdVersion = MS_BCD_VER,
+        .wIndex = 0x5, // ?
+        .wCount = 0 // no extended properties
+    };
 }
 
 void usb_set_ep(end_point *ep) {
