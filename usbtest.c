@@ -3,7 +3,7 @@
 #include <stdio.h>
 
 void ep1_func(uint8_t *buffer, uint8_t len) {
-    printf("%s", buffer);
+    printf("%s\n", buffer);
 }
 
 int main() {

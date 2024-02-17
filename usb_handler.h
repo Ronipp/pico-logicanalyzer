@@ -26,6 +26,7 @@ void usb_send_winusb_desc(volatile usb_setup_packet *packet);
 void usb_send_ms_props_desc(volatile usb_setup_packet *packet);
 
 void usb_set_ep(end_point *ep);
+void usb_set_ep_available(end_point *ep);
 
 void usb_make_str_to_unicode(const char *str, uint8_t *dst, uint8_t len);
 ms_os_string_descriptor usb_make_ms_os_str_desc(void);

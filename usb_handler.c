@@ -27,7 +27,6 @@
 static end_point ep0_in = {
     .number = 0,
     .pid = 1,
-    .available = true,
     .buffer = &usb_dpram->ep0_buf_a[0], // buffer is fixed for ep0
     .ep_ctrl = NULL, // no ep control for ep0
     .buf_ctrl = &usb_dpram->ep_buf_ctrl[0].in
@@ -35,7 +34,6 @@ static end_point ep0_in = {
 static end_point ep0_out = {
     .number = 0,
     .pid = 1,
-    .available = true,
     .buffer = &usb_dpram->ep0_buf_a[0],
     .ep_ctrl = NULL,
     .buf_ctrl = &usb_dpram->ep_buf_ctrl[0].out
@@ -44,8 +42,7 @@ static end_point ep0_out = {
 static end_point ep1_out = {
     .number = 1,
     .pid = 0,
-    .available = true,
-    .buffer = usb_dpram->epx_data, // start of shared buffer
+    .buffer = &usb_dpram->epx_data[0], // start of shared buffer
     .ep_ctrl = &usb_dpram->ep_ctrl[0].out,
     .buf_ctrl = &usb_dpram->ep_buf_ctrl[1].out
 };
@@ -68,9 +65,6 @@ void usb_init() {
     device_address = 0;
     change_address = false;
     configured = false;
-    // set the ep_control registers for ep1 and ep2
-    usb_set_ep(&ep1_out);
-    usb_set_ep(&ep2_in);
     // https://github.com/raspberrypi/pico-examples/blob/master/usb/device/dev_lowlevel/dev_lowlevel.c
     // resetting the usb controller
     reset_block(RESETS_RESET_USBCTRL_BITS);
@@ -90,7 +84,12 @@ void usb_init() {
     irq_set_exclusive_handler(USBCTRL_IRQ, usb_irq_handler);
     irq_set_enabled(USBCTRL_IRQ, true);
     // enable interrupts for setup request, bus reset and buff status change
-    usb_hw->inte = USB_INTE_SETUP_REQ_BITS | USB_INTE_BUS_RESET_BITS | USB_INTE_BUFF_STATUS_BITS;
+    usb_hw->inte = USB_INTE_SETUP_REQ_BITS | USB_INTE_BUS_RESET_BITS | USB_INTE_BUFF_STATUS_BITS | USB_INTE_ERROR_DATA_SEQ_BITS;
+
+    // set the ep_control registers for ep1 and ep2
+    usb_set_ep(&ep1_out);
+    usb_set_ep(&ep2_in);
+    usb_set_ep_available(&ep1_out);
 
 }
 
@@ -102,13 +101,16 @@ void usb_send(end_point *ep, uint8_t *buf, uint8_t len) {
     if (len > 64) assert(0 && "len has to be less than or equal 64");
     // wait till the ep buffer is in our control (buf_ctrl bit 10 is zero)
     // while (!(ep->available)) tight_loop_contents();
-    ep->available = false;
     // copy buffer contents to dpram
     memcpy((void *) ep->buffer, (void *) buf, len);
     // set transfer length, buffer full and pid flags in the control register
     *ep->buf_ctrl = len;
     *ep->buf_ctrl |= USB_BUF_CTRL_FULL;
-    *ep->buf_ctrl |= ((ep->pid) ? USB_BUF_CTRL_DATA1_PID : USB_BUF_CTRL_DATA0_PID);
+    if (ep->pid == 1) {
+        *ep->buf_ctrl |= USB_BUF_CTRL_DATA1_PID;
+    } else {
+        *ep->buf_ctrl &= ~USB_BUF_CTRL_DATA1_PID;
+    }
     // datasheet recommends 3 nops before setting available flag after setting other things in buffer control
     // i assume the pid flip takes at least 3 cycles
     ep->pid ^= 1u; // flip pid between 0 and 1
@@ -122,7 +124,16 @@ uint8_t usb_get(end_point *ep, uint8_t *buf, uint8_t max_len) {
     uint16_t len = *ep->buf_ctrl & USB_BUF_CTRL_LEN_MASK;
     // copy data from dpram to buffer
     memcpy((void *)buf, (void *)ep->buffer, MIN(len, max_len));
-    // TODO maybe check the pid?
+    // set buf ctrl full bit to zero
+    *ep->buf_ctrl &= ~USB_BUF_CTRL_FULL;
+    ep->pid ^= 1u; // flip pid between 0 and 1
+    if (ep->pid == 1) {
+        *ep->buf_ctrl |= USB_BUF_CTRL_DATA1_PID;
+    } else {
+        *ep->buf_ctrl &= ~USB_BUF_CTRL_DATA1_PID;
+    }
+    // for some reason the buf ctrl length has to be set to max in order to receive data
+    *ep->buf_ctrl |= 64;
     // set available to 1 so controller can take control
     *ep->buf_ctrl |= USB_BUF_CTRL_AVAIL;
     // return the size of the transfer in bytes
@@ -153,11 +164,8 @@ void usb_send_status(void) {
 void usb_setup_handler(void) {
     // the setup packet received
     volatile usb_setup_packet *packet = (volatile usb_setup_packet *) &usb_dpram->setup_packet;
-    printf("reqtype: 0x%02x, breq: 0x%02x\n", packet->bmRequestType, packet->bRequest);
-    printf("wval: 0x%04x, windx: 0x%04x, wlen: 0x%04x\n",packet->wValue, packet->wIndex, packet->wLength);
     // pid has to be 1 for sending descriptors
     ep0_in.pid = 1;
-    // only handling standard requests
     // if direction is in (device->host)
     if (packet->bmRequestType == USB_DIR_IN) {
         if (packet->bRequest == REQUEST_GET_DESCRIPTOR) {
@@ -253,6 +261,9 @@ void usb_irq_handler(void) {
         //clear the bus reset status from sie_status register
         usb_hw_clear->sie_status = USB_SIE_STATUS_BUS_RESET_BITS;
         usb_reset_bus();
+    } if (interrupt_flags & USB_INTS_ERROR_DATA_SEQ_BITS) {
+        usb_hw_clear->sie_status = USB_SIE_STATUS_DATA_SEQ_ERROR_BITS;
+        printf("data sequence error\n");
     }
 }
 
@@ -471,7 +482,11 @@ void usb_set_ep(end_point *ep) {
                     EP_CTRL_INTERRUPT_PER_BUFFER | 
                     (BULK_TRANSFER_TYPE << EP_CTRL_BUFFER_TYPE_LSB) |
                     ((uint32_t)ep->buffer ^ (uint32_t)usb_dpram);
-} 
+}
+
+void usb_set_ep_available(end_point *ep) {
+    *ep->buf_ctrl |= 64 | USB_BUF_CTRL_AVAIL;
+}
 
 // endpoint functions
 void ep0_in_func(void) {
@@ -498,9 +513,9 @@ void usb_register_ep2_in_func(ep_func_ptr function) {
 }
 
 void ep1_out_func(void) {
-    if (user_ep1_func == NULL) return;
     uint8_t buf[64];
     uint8_t len = usb_get(&ep1_out, buf, 64);
+    if (user_ep1_func == NULL) return;
     user_ep1_func(buf, len);
 }
 

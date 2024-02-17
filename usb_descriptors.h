@@ -218,7 +218,6 @@ endpoint struct
 typedef struct {
     uint8_t number; // number of this endpoint
     uint8_t pid; // next pid to use
-    uint8_t available; // when end point is available for reading or writing
     volatile uint8_t *buffer; // the dpram buffer location
     volatile uint32_t *ep_ctrl; // the ep control register location
     volatile  uint32_t *buf_ctrl; // the buffer control register location
