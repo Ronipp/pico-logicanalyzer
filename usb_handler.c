@@ -50,7 +50,7 @@ static end_point ep1_out = {
 static end_point ep2_in = {
     .number = 2,
     .pid = 0,
-    .buffer = &usb_dpram->epx_data[64], // next 64 bytes in shared buffer
+    .buffer = &usb_dpram->epx_data[64], // next 2 * 64 bytes in shared buffer (double buffered)
     .ep_ctrl = &usb_dpram->ep_ctrl[1].in,
     .buf_ctrl = &usb_dpram->ep_buf_ctrl[2].in
 };
@@ -60,6 +60,9 @@ static uint8_t device_address = 0;
 static bool change_address = false;
 // global configured flag
 static bool configured = false;
+// global end point functions
+static ep_func_ptr user_ep1_func = NULL;
+static ep2_func_ptr user_ep2_func = NULL;
 
 void usb_init() {
     device_address = 0;
@@ -90,6 +93,7 @@ void usb_init() {
     usb_set_ep(&ep1_out);
     usb_set_ep(&ep2_in);
     usb_set_ep_available(&ep1_out);
+    usb_set_ep_double_buffered(&ep2_in);
 
 }
 
@@ -237,7 +241,9 @@ void usb_buff_status_handler(void) {
     }
     if (unhandled & USB_BUFF_STATUS_EP2_IN_BITS) {
         usb_hw_clear->buf_status = USB_BUFF_STATUS_EP2_IN_BITS;
-        ep2_in_func();
+        uint8_t should_handle = (uint8_t)((usb_hw->buf_cpu_should_handle >> 3) & 1);
+        user_ep2_func(&ep2_in, should_handle);
+        
     }
     if (usb_hw->buf_status != 0) assert(0 && "unhandled end point");
 }
@@ -488,6 +494,10 @@ void usb_set_ep_available(end_point *ep) {
     *ep->buf_ctrl |= 64 | USB_BUF_CTRL_AVAIL;
 }
 
+void usb_set_ep_double_buffered(end_point *ep) {
+    *ep->ep_ctrl |= EP_CTRL_DOUBLE_BUFFERED_BITS;
+}
+
 // endpoint functions
 void ep0_in_func(void) {
     if (change_address) {
@@ -501,14 +511,11 @@ void ep0_in_func(void) {
 
 void ep0_out_func(void) {}
 
-static ep_func_ptr user_ep1_func = NULL;
-static ep_func_ptr user_ep2_func = NULL;
-
 void usb_register_ep1_out_func(ep_func_ptr function) {
     user_ep1_func = function;
 }
 
-void usb_register_ep2_in_func(ep_func_ptr function) {
+void usb_register_ep2_in_func(ep2_func_ptr function) {
     user_ep2_func = function;
 }
 
@@ -516,10 +523,9 @@ void ep1_out_func(void) {
     uint8_t buf[64];
     uint8_t len = usb_get(&ep1_out, buf, 64);
     if (user_ep1_func == NULL) return;
-    user_ep1_func(buf, len);
+    user_ep1_func(buf, &len);
 }
 
 void ep2_in_func(void) {
-
 }
 

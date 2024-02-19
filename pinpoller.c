@@ -36,3 +36,10 @@ void pinpoller_program_init(uint pinbase, int number_of_pins, sample_rates polli
     pio_sm_init(pio_inst, sm, offset, &c);
 
 }
+
+void pinpoller_compress(uint32_t data) {
+    uint32_t compressed = 0;
+    for (int i=0; i<32; i++) {
+        
+    }
+}

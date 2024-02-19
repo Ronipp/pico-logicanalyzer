@@ -1,5 +1,22 @@
 
 
-.program pinpoller
-    in pins, 1
+.program low_poller
+    out x 8         ; x=0xFE
+    wait 0 gpio 1234
+    loop:
+        jmp pin shift
+        jmp x-- loop
+    shift:
+        in x 8
+        
+
+.program high_poller
+    out x 8         ; x=0xFF
+    wait 1 gpio 1234
+    decrement:
+        jmp x-- loop
+    loop:
+        jump pin decrement
+    shift:
+        in x 8
 
