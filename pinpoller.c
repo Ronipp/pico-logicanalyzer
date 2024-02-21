@@ -16,3 +16,8 @@ void pinpoller_program_init(poller_program prog) {
 
     pio_sm_init(prog.pio, prog.sm, offset + pinpoller_offset_start, &c);
 }
+
+void pinpoller_clear_fifo(poller_program prog) {
+    pio_sm_clear_fifos(prog.pio, prog.sm);
+    
+}

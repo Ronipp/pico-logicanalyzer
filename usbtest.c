@@ -20,6 +20,11 @@ int main() {
     usb_register_ep1_out_func(ep1_func);
     usb_register_ep2_in_func(ep2_func);
 
+    uint8_t buf0[64] = {1};
+    uint8_t buf1[64] = {2};
+    usb_ep2_send(0, buf0, 64);
+    usb_ep2_send(1, buf1, 64);
+
 
     while (1) tight_loop_contents();
 }

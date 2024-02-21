@@ -212,6 +212,11 @@ typedef struct {
     uint16_t wCount; // should be 0?
 } __packed ms_extended_properties_descriptor;
 
+
+typedef struct {
+    uint16_t first;
+    uint16_t second;
+} __packed buf_ctrl_struct;
 /*
 endpoint struct
 */
@@ -219,8 +224,9 @@ typedef struct {
     uint8_t number; // number of this endpoint
     uint8_t pid; // next pid to use
     volatile uint8_t *buffer; // the dpram buffer location
+    volatile uint8_t *buffer_second; // second buffer location
     volatile uint32_t *ep_ctrl; // the ep control register location
-    volatile  uint32_t *buf_ctrl; // the buffer control register location
+    volatile buf_ctrl_struct *buf_ctrl; // the buffer control registers
 } end_point;
 
 #endif

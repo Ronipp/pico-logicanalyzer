@@ -18,4 +18,4 @@ typedef struct {
 
 
 void pinpoller_program_init(poller_program prog);
-
+void pinpoller_clear_fifo(poller_program prog);

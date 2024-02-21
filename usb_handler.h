@@ -9,7 +9,8 @@ typedef void (*ep2_func_ptr)(end_point *ep, uint8_t buf_to_handle);
 
 void usb_init();
 bool usb_is_configured(void);
-void usb_send(end_point *ep, uint8_t *buf, uint8_t len);
+void usb_send(end_point *ep, uint8_t buf_num, uint8_t *buf, uint8_t len);
+void usb_ep2_send(uint8_t buf_num, uint8_t *buf, uint8_t len);
 uint8_t usb_get(end_point *ep, uint8_t *buf, uint8_t max_len);
 void usb_send_ack(void);
 void usb_send_config_num(void);

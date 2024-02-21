@@ -28,31 +28,35 @@ static end_point ep0_in = {
     .number = 0,
     .pid = 1,
     .buffer = &usb_dpram->ep0_buf_a[0], // buffer is fixed for ep0
+    .buffer_second = NULL,
     .ep_ctrl = NULL, // no ep control for ep0
-    .buf_ctrl = &usb_dpram->ep_buf_ctrl[0].in
+    .buf_ctrl = (buf_ctrl_struct *)&usb_dpram->ep_buf_ctrl[0].in,
 };
 static end_point ep0_out = {
     .number = 0,
     .pid = 1,
     .buffer = &usb_dpram->ep0_buf_a[0],
+    .buffer_second = NULL,
     .ep_ctrl = NULL,
-    .buf_ctrl = &usb_dpram->ep_buf_ctrl[0].out
+    .buf_ctrl = (buf_ctrl_struct *)&usb_dpram->ep_buf_ctrl[0].out,
 };
 
 static end_point ep1_out = {
     .number = 1,
     .pid = 0,
     .buffer = &usb_dpram->epx_data[0], // start of shared buffer
+    .buffer_second = NULL,
     .ep_ctrl = &usb_dpram->ep_ctrl[0].out,
-    .buf_ctrl = &usb_dpram->ep_buf_ctrl[1].out
+    .buf_ctrl = (buf_ctrl_struct *)&usb_dpram->ep_buf_ctrl[1].out,
 };
 
 static end_point ep2_in = {
     .number = 2,
     .pid = 0,
-    .buffer = &usb_dpram->epx_data[64], // next 2 * 64 bytes in shared buffer (double buffered)
+    .buffer = &usb_dpram->epx_data[64], // next 64 bytes in shared buffer
+    .buffer_second = &usb_dpram->epx_data[64 * 2], // the next 64 bytes after first buffer
     .ep_ctrl = &usb_dpram->ep_ctrl[1].in,
-    .buf_ctrl = &usb_dpram->ep_buf_ctrl[2].in
+    .buf_ctrl = (buf_ctrl_struct *)&usb_dpram->ep_buf_ctrl[2].in,
 };
 
 // global address
@@ -101,67 +105,76 @@ bool usb_is_configured(void) {
     return configured;
 }
 
-void usb_send(end_point *ep, uint8_t *buf, uint8_t len) {
+void usb_send(end_point *ep, uint8_t buf_num, uint8_t *buf, uint8_t len) {
     if (len > 64) assert(0 && "len has to be less than or equal 64");
-    // wait till the ep buffer is in our control (buf_ctrl bit 10 is zero)
-    // while (!(ep->available)) tight_loop_contents();
     // copy buffer contents to dpram
-    memcpy((void *) ep->buffer, (void *) buf, len);
+    volatile uint8_t *ep_buf = ep->buffer;
+    if (buf_num == 1) ep_buf = ep->buffer_second;
+    memcpy((void *) ep_buf, (void *) buf, len);
     // set transfer length, buffer full and pid flags in the control register
-    *ep->buf_ctrl = len;
-    *ep->buf_ctrl |= USB_BUF_CTRL_FULL;
-    if (ep->pid == 1) {
-        *ep->buf_ctrl |= USB_BUF_CTRL_DATA1_PID;
+    uint32_t buf_ctrl = len | USB_BUF_CTRL_FULL;
+    if (ep->pid == 1) buf_ctrl |= USB_BUF_CTRL_DATA1_PID;
+    if (buf_num == 1) {
+        ep->buf_ctrl->second = buf_ctrl;
     } else {
-        *ep->buf_ctrl &= ~USB_BUF_CTRL_DATA1_PID;
+        ep->buf_ctrl->first = buf_ctrl; // set buffer control bits
     }
     // datasheet recommends 3 nops before setting available flag after setting other things in buffer control
     // i assume the pid flip takes at least 3 cycles
     ep->pid ^= 1u; // flip pid between 0 and 1
     // set available to 1 so controller can take control
-    *ep->buf_ctrl |= USB_BUF_CTRL_AVAIL;
+    if (buf_num == 1) {
+        ep->buf_ctrl->second |= USB_BUF_CTRL_AVAIL;    
+    } else {
+        ep->buf_ctrl->first |= USB_BUF_CTRL_AVAIL;
+    }
 }
+
+void usb_ep2_send(uint8_t buf_num, uint8_t *buf, uint8_t len) {
+    usb_send(&ep2_in, buf_num, buf, len);
+}
+
 
 uint8_t usb_get(end_point *ep, uint8_t *buf, uint8_t max_len) {
     if (max_len > 64) assert(0 && "len has to be less than or equal 64");
     // get the length of the transfer
-    uint16_t len = *ep->buf_ctrl & USB_BUF_CTRL_LEN_MASK;
+    uint16_t len = ep->buf_ctrl->first & USB_BUF_CTRL_LEN_MASK;
     // copy data from dpram to buffer
     memcpy((void *)buf, (void *)ep->buffer, MIN(len, max_len));
     // set buf ctrl full bit to zero
-    *ep->buf_ctrl &= ~USB_BUF_CTRL_FULL;
+    ep->buf_ctrl->first &= ~USB_BUF_CTRL_FULL;
     ep->pid ^= 1u; // flip pid between 0 and 1
     if (ep->pid == 1) {
-        *ep->buf_ctrl |= USB_BUF_CTRL_DATA1_PID;
+        ep->buf_ctrl->first |= USB_BUF_CTRL_DATA1_PID;
     } else {
-        *ep->buf_ctrl &= ~USB_BUF_CTRL_DATA1_PID;
+        ep->buf_ctrl->first &= ~USB_BUF_CTRL_DATA1_PID;
     }
     // for some reason the buf ctrl length has to be set to max in order to receive data
-    *ep->buf_ctrl |= 64;
+    ep->buf_ctrl->first |= 64;
     // set available to 1 so controller can take control
-    *ep->buf_ctrl |= USB_BUF_CTRL_AVAIL;
+    ep->buf_ctrl->first |= USB_BUF_CTRL_AVAIL;
     // return the size of the transfer in bytes
     return len;
 }
 
 void usb_send_ack(void) {
-    usb_send(&ep0_in, NULL, 0);
+    usb_send(&ep0_in, 0, NULL, 0);
 }
 
 void usb_send_stall(void) {
     usb_hw->ep_stall_arm = 0x1;
-    *ep0_in.buf_ctrl |= USB_BUF_CTRL_STALL;
+    ep0_in.buf_ctrl->first |= USB_BUF_CTRL_STALL;
 }
 
 void usb_send_config_num(void) {
     uint8_t config_num = 1;
-    usb_send(&ep0_in, &config_num, 1);
+    usb_send(&ep0_in, 0, &config_num, 1);
 }
 
 void usb_send_status(void) {
     printf("send status\n");
     uint16_t status = DEVICE_STATUS;
-    usb_send(&ep0_in, (uint8_t *)&status, 2);
+    usb_send(&ep0_in, 0, (uint8_t *)&status, 2);
 }
 
 // called when setup request irq is raised
@@ -241,7 +254,7 @@ void usb_buff_status_handler(void) {
     }
     if (unhandled & USB_BUFF_STATUS_EP2_IN_BITS) {
         usb_hw_clear->buf_status = USB_BUFF_STATUS_EP2_IN_BITS;
-        uint8_t should_handle = (uint8_t)((usb_hw->buf_cpu_should_handle >> 3) & 1);
+        uint8_t should_handle = (uint8_t)(usb_hw->buf_cpu_should_handle >> 4);
         user_ep2_func(&ep2_in, should_handle);
         
     }
@@ -300,7 +313,7 @@ void usb_send_string_desc(volatile usb_setup_packet *packet) {
             .bDescriptorType = STRING_DESCRIPTOR_TYPE,
             .wLANGID0 = LANG_US
         };
-        usb_send(&ep0_in, (uint8_t *)&desc, MIN(sizeof(language_descriptor), packet->wLength));
+        usb_send(&ep0_in, 0, (uint8_t *)&desc, MIN(sizeof(language_descriptor), packet->wLength));
     } else if (index == MANUFACTURER_STRING_INDEX) {
         const char *string = "Ronald";
         uint8_t buflen = ((2 * strlen(string)) + sizeof(string_descriptor_head));
@@ -311,7 +324,7 @@ void usb_send_string_desc(volatile usb_setup_packet *packet) {
         uint8_t buf[64];
         memcpy((void *)buf, (void *)&head, sizeof(head));
         usb_make_str_to_unicode(string, buf + sizeof(head), 64 - sizeof(head));
-        usb_send(&ep0_in, buf, MIN(buflen, packet->wLength));
+        usb_send(&ep0_in, 0, buf, MIN(buflen, packet->wLength));
     } else if (index == PRODUCT_STRING_INDEX) {
         const char *string = "Logic";
         uint8_t buflen = ((2 * strlen(string)) + sizeof(string_descriptor_head));
@@ -322,10 +335,10 @@ void usb_send_string_desc(volatile usb_setup_packet *packet) {
         uint8_t buf[64];
         memcpy((void *)buf, (void *)&head, sizeof(head));
         usb_make_str_to_unicode(string, buf + sizeof(head), 64 - sizeof(head));
-        usb_send(&ep0_in, buf, MIN(buflen, packet->wLength));
+        usb_send(&ep0_in, 0, buf, MIN(buflen, packet->wLength));
     } else if (index == WINDOWS_STRING_DESCRIPTOR_INDEX) {
         ms_os_string_descriptor desc = usb_make_ms_os_str_desc();
-        usb_send(&ep0_in, (uint8_t *)&desc, MIN(sizeof(desc), packet->wLength));
+        usb_send(&ep0_in, 0, (uint8_t *)&desc, MIN(sizeof(desc), packet->wLength));
     } else {
         printf("%d : %d\n", packet->wValue, packet->wIndex);
         assert(0 && "some other index");
@@ -354,19 +367,19 @@ ms_os_string_descriptor usb_make_ms_os_str_desc(void) {
 void usb_send_winusb_desc(volatile usb_setup_packet *packet) {
     printf("send winusb\n");
     winsub_descriptor desc = usb_make_winusb_desc();
-    usb_send(&ep0_in, (uint8_t *)&desc, MIN(sizeof(desc), packet->wLength));
+    usb_send(&ep0_in, 0, (uint8_t *)&desc, MIN(sizeof(desc), packet->wLength));
 }
 
 void usb_send_ms_props_desc(volatile usb_setup_packet *packet) {
     printf("send ms props\n");
     ms_extended_properties_descriptor desc = usb_make_ms_props_desc();
-    usb_send(&ep0_in, (uint8_t *)&desc, MIN(sizeof(desc), packet->wLength));
+    usb_send(&ep0_in, 0, (uint8_t *)&desc, MIN(sizeof(desc), packet->wLength));
 }
 
 void usb_send_dev_desc(volatile usb_setup_packet *packet) {
     printf("send dev\n");
     device_descriptor desc = usb_make_dev_desc();
-    usb_send(&ep0_in, (uint8_t *)&desc, MIN(packet->wLength, sizeof(desc)));
+    usb_send(&ep0_in, 0, (uint8_t *)&desc, MIN(packet->wLength, sizeof(desc)));
 }
 
 void usb_send_conf_desc(volatile usb_setup_packet *packet) {
@@ -388,7 +401,7 @@ void usb_send_conf_desc(volatile usb_setup_packet *packet) {
         index += sizeof(end_desc2);
     }
 
-    usb_send(&ep0_in, tmp_buf, MIN(packet->wLength, index));
+    usb_send(&ep0_in, 0, tmp_buf, MIN(packet->wLength, index));
 }
 
 device_descriptor usb_make_dev_desc() {
@@ -491,7 +504,7 @@ void usb_set_ep(end_point *ep) {
 }
 
 void usb_set_ep_available(end_point *ep) {
-    *ep->buf_ctrl |= 64 | USB_BUF_CTRL_AVAIL;
+    ep->buf_ctrl->first |= 64 | USB_BUF_CTRL_AVAIL;
 }
 
 void usb_set_ep_double_buffered(end_point *ep) {
