@@ -1,22 +1,18 @@
 
-
-.program low_poller
-    out x 8         ; x=0xFE
-    wait 0 gpio 1234
-    loop:
-        jmp pin shift
-        jmp x-- loop
-    shift:
-        in x 8
-        
-
-.program high_poller
-    out x 8         ; x=0xFF
-    wait 1 gpio 1234
-    decrement:
-        jmp x-- loop
-    loop:
-        jump pin decrement
-    shift:
-        in x 8
-
+.program pinpoller
+; polling might drift in some cases be aware
+    high_decrement:
+        jmp y-- high_loop       ; decrement y if y is zero continue to low
+    .wrap_target                ; wrap here incase pin was low during high loop
+    low:    
+        in y 8                  ; shift high count to isr
+    public start:
+        out x 8                 ; load 0xFE into x (C program needs to supply this continuously)
+    low_loop:   
+        jmp pin high            ; if pin is high go to high loop else continue
+        jmp x-- low_loop        ; decrement x and loop unless x is zero 
+    high:   
+        in x 8                  ; shift low count to isr
+        out y 8                 ; load 0xFE into y
+    high_loop:
+        jmp pin high_decrement  ; if pin is high go to decrement high count otherwise wrap to low

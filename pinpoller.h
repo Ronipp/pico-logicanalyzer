@@ -1,6 +1,7 @@
 #pragma once
 
 #include "hardware/pio.h"
+#include "hardware/pio.h"
 
 typedef enum {
     SR_125MHZ = 1,
@@ -8,5 +9,13 @@ typedef enum {
     SR_31MHZ = 3,
 } sample_rates;
 
-void pinpoller_program_init(uint pinbase, int number_of_pins, sample_rates polling_rate, uint statemachine, PIO pio_inst);
+typedef struct {
+    uint pin;               // pin to poll
+    PIO pio;                // pio to use
+    uint sm;                // statemachine to use
+    sample_rates poll_rate; // poll rate to use
+} poller_program;
+
+
+void pinpoller_program_init(poller_program prog);
 

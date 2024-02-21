@@ -3,41 +3,29 @@
 #include "pinpoller.h"
 #include "hardware/pio.h"
 #include "hardware/dma.h"
+#include "dma_handler.h"
 #include <stdio.h>
 
 #define PIN 28
 
-int init_dma(uint32_t *destination, size_t size, PIO pio, uint sm) {
-    int channel = dma_claim_unused_channel(true);
-    dma_channel_config c = dma_channel_get_default_config(channel);
-    channel_config_set_transfer_data_size(&c, DMA_SIZE_32);
-    channel_config_set_dreq(&c, DREQ_PIO0_RX0);
-    channel_config_set_read_increment(&c, false);
-    channel_config_set_write_increment(&c, true);
-    dma_channel_configure(
-        channel,
-        &c,
-        destination,
-        &pio->rxf[sm],
-        size,
-        false);
-    return channel;
-}
+#define TX_PAYLOAD 0xFEFEFEFE
+
 
 int main() {
     stdio_init_all();
 
     uint32_t buf[1024] = {0};
-    PIO pio = pio0;
-    uint sm = pio_claim_unused_sm(pio, true);
-    pinpoller_program_init(PIN, 1, SR_125MHZ, sm, pio);
+    poller_program prog = {PIN, pio0, pio_claim_unused_sm(pio0, true), SR_125MHZ};
+    pinpoller_program_init(prog);
     
-    int channel = init_dma(buf, 1024, pio, sm);
-    dma_channel_start(channel);
-    pio_sm_set_enabled(pio, sm, true);
+    int channel_rx = init_getter_dma(buf, 1024, prog);
+    uint32_t payload = TX_PAYLOAD;
+    int channel_tx = init_setter_dma(&payload, prog);
+    dma_channel_start(channel_rx);
+    pio_sm_set_enabled(prog.pio, prog.sm, true);
 
-    dma_channel_wait_for_finish_blocking(channel);
-    pio_sm_set_enabled(pio, sm, false);
+    dma_channel_wait_for_finish_blocking(channel_rx);
+    pio_sm_set_enabled(prog.pio, prog.sm, false);
 
 
     
